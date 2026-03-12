@@ -1,6 +1,8 @@
 import React from "react";
 import { Card, Col, Row } from "@hrportal/components";
 import { Text, type Descendant } from "slate";
+import { decodeEmailHtml } from "./slateToHtml";
+import { htmlToSlate } from "./htmlToSlate";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -23,9 +25,7 @@ type CustomElement = {
 
 export type EmailPreviewProps = {
 	lineOfBusiness?: string;
-	headerText?: string;
-	bodyJson: string;
-	footerText?: string;
+	htmlBody: string;   // single encoded string from SlateEditor getText()
 };
 
 // ─── Slate JSON → React ───────────────────────────────────────────────────────
@@ -86,31 +86,14 @@ function renderNode(node: Descendant, index: number): React.ReactNode {
 	}
 }
 
-function parseBody(json: string): Descendant[] {
-	if (!json) return [];
-	try {
-		const parsed = JSON.parse(json);
-		if (Array.isArray(parsed)) return parsed;
-	} catch {
-		return [
-			{
-				type: "paragraph",
-				children: [{ text: json }],
-			} as unknown as Descendant,
-		];
-	}
-	return [];
-}
-
 // ─── EmailPreview ─────────────────────────────────────────────────────────────
 
 export const EmailPreview: React.FC<EmailPreviewProps> = ({
 	lineOfBusiness,
-	headerText,
-	bodyJson,
-	footerText,
+	htmlBody,
 }) => {
-	const nodes = parseBody(bodyJson);
+	const { headerText, bodyHtml, footerText } = decodeEmailHtml(htmlBody);
+	const nodes = htmlToSlate(bodyHtml);
 
 	return (
 		<section>
