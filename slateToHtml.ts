@@ -192,7 +192,8 @@ export function encodeEmailHtml({
 	bodyJson,
 	footerText,
 }: EmailSaveOptions): string {
-	const bodyHtml = slateToBodyHtml(bodyJson);
+	const nodes = parseBody(bodyJson);
+	const bodyHtml = nodes.map(nodeToHtml).join("");
 
 	const headerPart = headerText
 		? `<div data-role="header">${escapeHtml(headerText)}</div>`
