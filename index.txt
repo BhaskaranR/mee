@@ -1,0 +1,44 @@
+const form = useForm<TTemplateForm>({
+  resolver: zodResolver(ZTemplateForm),
+  defaultValues: { htmlBody: "" }
+});
+
+const { setValue, watch } = form;
+
+// Watch the value for preview
+const htmlBody = watch("htmlBody");
+
+// Pass into SlateEditor
+<SlateEditor
+  getText={() => htmlBody}
+  setText={(html) => setValue("htmlBody", html, {
+    shouldDirty: true,
+    shouldValidate: true,
+    shouldTouch: true,
+  })}
+  updateTemplate={isEditMode}
+  firstRender={firstRender}
+  setFirstRender={setFirstRender}
+  variables={variables}
+/>
+
+
+//in the zod schema - 
+
+const ZTemplateForm = z.object({
+  // ... other fields
+  htmlBody: z.string().min(1, "Email body is required"),
+});
+
+//For the error state, pass isInvalid to the editor:
+const { formState: { errors } } = form;
+
+<SlateEditor
+  ...
+  isInvalid={!!errors.htmlBody}
+/>
+{errors.htmlBody && (
+  <div className="text-danger small mt-1">
+    {errors.htmlBody.message}
+  </div>
+)}
