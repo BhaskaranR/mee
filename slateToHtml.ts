@@ -177,10 +177,77 @@ export function slateToEmailHtml({
 </html>`;
 }
 
-// ─── Lightweight export: body-only HTML (no email wrapper) ────────────────────
-// Use this if the Spring Boot backend wraps in its own email template
+// ─── Single HTML string with header + body + footer ──────────────────────────
+// Use this when the API only accepts one htmlBody field.
+// Header and footer are encoded as data-role divs so they can be parsed back.
 
-export function slateToBodyHtml(bodyJson: string): string {
-	const nodes = parseBody(bodyJson);
-	return nodes.map(nodeToHtml).join("");
+export type EmailSaveOptions = {
+	headerText?: string;
+	bodyJson: string;
+	footerText?: string;
+};
+
+export function encodeEmailHtml({
+	headerText,
+	bodyJson,
+	footerText,
+}: EmailSaveOptions): string {
+	const bodyHtml = slateToBodyHtml(bodyJson);
+
+	const headerPart = headerText
+		? `<div data-role="header">${escapeHtml(headerText)}</div>`
+		: "";
+
+	const footerPart = footerText
+		? `<div data-role="footer">${escapeHtml(footerText)}</div>`
+		: "";
+
+	return `${headerPart}<div data-role="body">${bodyHtml}</div>${footerPart}`;
+}
+
+export type DecodedEmail = {
+	headerText: string;
+	bodyHtml: string;
+	footerText: string;
+};
+
+export function decodeEmailHtml(html: string): DecodedEmail {
+	if (!html?.trim()) {
+		return { headerText: "", bodyHtml: "", footerText: "" };
+	}
+
+	// Browser
+	if (typeof window !== "undefined" && typeof window.DOMParser !== "undefined") {
+		const doc = new DOMParser().parseFromString(html, "text/html");
+
+		const headerEl = doc.querySelector('[data-role="header"]');
+		const bodyEl   = doc.querySelector('[data-role="body"]');
+		const footerEl = doc.querySelector('[data-role="footer"]');
+
+		return {
+			headerText: headerEl?.textContent?.trim() ?? "",
+			bodyHtml:   bodyEl?.innerHTML ?? html,   // fallback: treat entire string as body
+			footerText: footerEl?.textContent?.trim() ?? "",
+		};
+	}
+
+	// Node.js fallback — simple regex
+	const headerMatch = html.match(/<div data-role="header">(.*?)<\/div>/s);
+	const bodyMatch   = html.match(/<div data-role="body">(.*?)<\/div>/s);
+	const footerMatch = html.match(/<div data-role="footer">(.*?)<\/div>/s);
+
+	return {
+		headerText: headerMatch ? unescapeHtmlString(headerMatch[1]) : "",
+		bodyHtml:   bodyMatch   ? bodyMatch[1] : html,
+		footerText: footerMatch ? unescapeHtmlString(footerMatch[1]) : "",
+	};
+}
+
+function unescapeHtmlString(text: string): string {
+	return text
+		.replace(/&amp;/g, "&")
+		.replace(/&lt;/g, "<")
+		.replace(/&gt;/g, ">")
+		.replace(/&quot;/g, '"')
+		.replace(/&#039;/g, "'");
 }
