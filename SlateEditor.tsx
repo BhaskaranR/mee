@@ -15,6 +15,8 @@ import {
 	Element as SlateElement,
 	Transforms,
 } from "slate";
+import { parseEditorValue } from "./htmlToSlate";
+import { encodeEmailHtml, decodeEmailHtml } from "./slateToHtml";
 import {
 	Slate,
 	Editable,
@@ -50,15 +52,9 @@ declare module "slate" {
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 export type TextEditorProps = {
-	// Body
+	// Single encoded HTML string (header + body + footer)
 	getText: () => string;
-	setText: (text: string) => void;
-	// Header (optional — only renders if prop is passed)
-	headerText?: string;
-	setHeaderText?: (v: string) => void;
-	// Footer (optional — only renders if prop is passed)
-	footerText?: string;
-	setFooterText?: (v: string) => void;
+	setText: (html: string) => void;
 	// Toolbar
 	excludedToolbarItems?: string[];
 	variables?: string[];
@@ -447,26 +443,11 @@ const renderLeaf = (props: any) => {
 
 const EMPTY_VALUE: Descendant[] = [{ type: "paragraph", children: [{ text: "" }] }];
 
-function parseValue(raw: string): Descendant[] {
-	if (!raw) return EMPTY_VALUE;
-	try {
-		const parsed = JSON.parse(raw);
-		if (Array.isArray(parsed) && parsed.length) return parsed as Descendant[];
-	} catch {
-		return [{ type: "paragraph", children: [{ text: raw }] }];
-	}
-	return EMPTY_VALUE;
-}
-
 // ─── SlateEditor ─────────────────────────────────────────────────────────────
 
 export const SlateEditor: React.FC<TextEditorProps> = ({
 	getText,
 	setText,
-	headerText,
-	setHeaderText,
-	footerText,
-	setFooterText,
 	excludedToolbarItems = [],
 	variables = [],
 	height,
@@ -481,20 +462,43 @@ export const SlateEditor: React.FC<TextEditorProps> = ({
 }) => {
 	const editor = useMemo(() => withLinks(withHistory(withReact(createEditor()))), []);
 
+	// Decode the single HTML string into its three parts on mount
+	const decoded = useMemo(() => {
+		if (updateTemplate && firstRender) {
+			return decodeEmailHtml(getText());
+		}
+		return { headerText: "", bodyHtml: "", footerText: "" };
+	}, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+	const [headerText, setHeaderText] = useState(decoded.headerText);
+	const [footerText, setFooterText] = useState(decoded.footerText);
+
 	const [value, setValue] = useState<Descendant[]>(() =>
-		updateTemplate && firstRender ? parseValue(getText()) : EMPTY_VALUE,
+		decoded.bodyHtml ? parseEditorValue(decoded.bodyHtml) : EMPTY_VALUE,
 	);
 
 	useEffect(() => {
 		if (updateTemplate && firstRender) setFirstRender?.(false);
 	}, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+	// Encode all three parts back into one HTML string on every change
+	const encode = useCallback(
+		(newValue: Descendant[], header: string, footer: string) => {
+			setText(encodeEmailHtml({
+				headerText: header,
+				bodyJson: JSON.stringify(newValue),
+				footerText: footer,
+			}));
+		},
+		[setText],
+	);
+
 	const excluded = new Set(excludedToolbarItems);
 
 	const handleChange = useCallback(
 		(newValue: Descendant[]) => {
 			setValue(newValue);
-			setText(JSON.stringify(newValue));
+			encode(newValue, headerText, footerText);
 			if (onEmptyChange) {
 				const isEmpty =
 					newValue.length === 1 &&
@@ -504,7 +508,23 @@ export const SlateEditor: React.FC<TextEditorProps> = ({
 				onEmptyChange(isEmpty);
 			}
 		},
-		[setText, onEmptyChange],
+		[encode, headerText, footerText, onEmptyChange],
+	);
+
+	const handleHeaderChange = useCallback(
+		(v: string) => {
+			setHeaderText(v);
+			encode(value, v, footerText);
+		},
+		[encode, value, footerText],
+	);
+
+	const handleFooterChange = useCallback(
+		(v: string) => {
+			setFooterText(v);
+			encode(value, headerText, v);
+		},
+		[encode, value, headerText],
 	);
 
 	const handleKeyDown = useCallback(
@@ -521,8 +541,6 @@ export const SlateEditor: React.FC<TextEditorProps> = ({
 		[editor],
 	);
 
-	const showHeader = headerText !== undefined || !!setHeaderText;
-	const showFooter = footerText !== undefined || !!setFooterText;
 	const [buttonPanelOpen, setButtonPanelOpen] = useState(false);
 
 	return (
@@ -583,26 +601,24 @@ export const SlateEditor: React.FC<TextEditorProps> = ({
 				<div className="p-3">
 
 					{/* Header */}
-					{showHeader && (
-						<div className="mb-3">
-							{/* "Header" label is a locked UI guide — not saved or shown in preview */}
-							<div
-								className="d-flex align-items-center gap-2 mb-1"
-								style={{ userSelect: "none", pointerEvents: "none" }}
-							>
-								<span className="small fw-semibold text-muted">Header</span>
-								<i className="hlx hlx-lock text-muted" aria-hidden="true" style={{ fontSize: 11 }} />
-							</div>
-							<input
-								type="text"
-								className="form-control"
-								value={headerText ?? ""}
-								onChange={(e) => setHeaderText?.(e.target.value)}
-								readOnly={!editableProp || !setHeaderText}
-								placeholder="Enter header text..."
-							/>
+					<div className="mb-3">
+						{/* "Header" label is a locked UI guide — not saved or shown in preview */}
+						<div
+							className="d-flex align-items-center gap-2 mb-1"
+							style={{ userSelect: "none", pointerEvents: "none" }}
+						>
+							<span className="small fw-semibold text-muted">Header</span>
+							<i className="hlx hlx-lock text-muted" aria-hidden="true" style={{ fontSize: 11 }} />
 						</div>
-					)}
+						<input
+							type="text"
+							className="form-control"
+							value={headerText}
+							onChange={(e) => handleHeaderChange(e.target.value)}
+							readOnly={!editableProp}
+							placeholder="Enter header text..."
+						/>
+					</div>
 
 					{/* Body */}
 					<div
@@ -620,26 +636,24 @@ export const SlateEditor: React.FC<TextEditorProps> = ({
 					</div>
 
 					{/* Footer */}
-					{showFooter && (
-						<div className="mt-3">
-							{/* "Footer" label is a locked UI guide — not saved or shown in preview */}
-							<div
-								className="d-flex align-items-center gap-2 mb-1"
-								style={{ userSelect: "none", pointerEvents: "none" }}
-							>
-								<span className="small fw-semibold text-muted">Footer</span>
-								<i className="hlx hlx-lock text-muted" aria-hidden="true" style={{ fontSize: 11 }} />
-							</div>
-							<input
-								type="text"
-								className="form-control"
-								value={footerText ?? ""}
-								onChange={(e) => setFooterText?.(e.target.value)}
-								readOnly={!editableProp || !setFooterText}
-								placeholder="Enter footer text..."
-							/>
+					<div className="mt-3">
+						{/* "Footer" label is a locked UI guide — not saved or shown in preview */}
+						<div
+							className="d-flex align-items-center gap-2 mb-1"
+							style={{ userSelect: "none", pointerEvents: "none" }}
+						>
+							<span className="small fw-semibold text-muted">Footer</span>
+							<i className="hlx hlx-lock text-muted" aria-hidden="true" style={{ fontSize: 11 }} />
 						</div>
-					)}
+						<input
+							type="text"
+							className="form-control"
+							value={footerText}
+							onChange={(e) => handleFooterChange(e.target.value)}
+							readOnly={!editableProp}
+							placeholder="Enter footer text..."
+						/>
+					</div>
 
 				</div>
 			</Slate>
